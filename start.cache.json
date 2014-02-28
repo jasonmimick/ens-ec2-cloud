@@ -1,0 +1,6 @@
+/*
+          "sudo ",{ "Ref" : "IscInstallDir" },"/bin/ccontrol start ",{"Ref":"IscInstanceName"},
+          " || error_exit 'Failed to start ",{"Ref":"IscInstanceName"},"'\n",
+          "echo 'Started Cache' >> /home/admin/cloudformation.log","\n",
+          "# Install software into Cache\n",
+        */

@@ -60,6 +60,22 @@
       "MaxLength": "41"
     },
 
+	"ZenCloudMessagingDemoAppleCAFile" : {
+	  "Description" : "Certificate Authority file (.cer) to use in APNS SSL Configuration",
+	  "Type" : "String",
+	  "Default" : "https://ens-ec2-cloud.s3.amazonaws.com/apns/apple.ca.cer"
+	},
+	"ZenCloudMessagingDemoAppleCertificateFile" : {
+	  "Description" : "Public certificate file (.pem) to use in APNS SSL Configuration",
+	  "Type" : "String",
+	  "Default" : "https://ens-ec2-cloud.s3.amazonaws.com/apns/apns.cert.pem"
+	},
+	"ZenCloudMessagingDemoApplePrivateKeyFile" : {
+	  "Description" : "Private key file (.pem) to use in APNS SSL Configuration",
+	  "Type" : "String",
+	  "Default" : "https://ens-ec2-cloud.s3.amazonaws.com/apns/apns.privatekey.pem"
+	},
+	
     "InstanceType" : {
       "Description" : "EC2 instance type",
       "Type" : "String",
@@ -98,13 +114,91 @@
             "packages" : {
               "apt" : {
 				"vim"		   : [],
+				"expect"	   : [],
 				"curl"		   : []
               }
             },
             "sources" : {
-              "/home/admin/isc_install" : "http://healthshare.us/open_downloads/open/ensemble-2014.1.0.600.0-lnxsusex64.tar.gz",
-			 "/home/admin/package.install.fix" : "http://healthshare.us/open_downloads/open/install.zip"
-            }
+              "/home/admin/isc_install" : "https://ens-ec2-cloud.s3.amazonaws.com/ensemble-2014.1.0.600.0-lnxsusex64.tar.gz",
+			 "/home/admin/ens-ec2-cloud" : "https://github.com/jasonmimick/ens-ec2-cloud/tarball/master",
+			 "/home/admin/gs2014"	: "https://github.com/jasonmimick/gs2014/tarball/master"
+            },
+			"files" : {
+			 "/tmp/setup.zencloudmessaging" : {
+				 "content" : { "Fn::Join" : ["", [
+					"#!/bin/bash -f","\n",
+					"# script to setup zencloudmessaing from github","\n",
+					"# and configure ensemble to send cloud alerts","\n",
+					"NAMESPACE=ENSDEMO","\n",
+					"CSESSION=\"",{ "Ref" : "IscInstallDir" },"/bin/csession ",{"Ref":"IscInstanceName"},
+						" -U $NAMESPACE\"","\n",
+					"/usr/bin/expect <<End-Of-Expect","\n",
+					"spawn $CSESSION","\n",
+					"expect \"Username: \" {","\n",
+					"   send \"_system","\\r\"","\n",
+					"}","\n",
+					"expect \"Password: \" {","\n",
+					"   send \"",{"Ref":"IscUserPassword"},"\\r\"","\n",
+					"}","\n",
+					"expect \"$NAMESPACE>\" {","\n",
+					"   send \"do ##class(%SYSTEM.OBJ).Load(\"/home/admin/gs2014/MyZenCloudMessaging.prj.xml\",\"ck\") ","\\r\"","\n",
+					"}","\n",
+					"expect \"$NAMESPACE>\" {","\n",
+					"   send \"do Setup^LoadZENCloudMessaging ","\\r\"","\n",
+					"}","\n",
+					"expect \"$NAMESPACE>\" {","\n",
+					"   send \"zn \"%SYS\"","\\r\"","\n",
+					"}","\n",
+					"expect \"%SYS>\" {","\n",
+					"   send \"do ##class(Security.SSLConfigs.Import(\"/tmp/apple.ssl.xml\")","\\r\"","\n",
+					"}","\n",
+					"expect \"%SYS>\" {","\n",
+					"   send \"zn \"$NAMESPACE\"","\\r\"","\n",
+					"}","\n",
+					"expect \"$NAMESPACE>\" {","\n",
+					"   send \"do ##class(Ens.Director).StartProduction(\"Test.ZenCloudMessaging.DevProduction\")","\\r\"","\n",
+					"}","\n",
+					"expect \"$NAMESPACE>\" {","\n",
+					"   send \"halt","\\r\"","\n",
+					"}","\n",
+					"End-Of-Expect","\n"
+				
+				]]},
+				"mode" : "000500",
+				"owner" : "root",
+				"group" : "root"
+			 },
+			 "/tmp/apple.ssl.xml" : {
+				"content" : { "Fn::Join" : ["", [
+				"<?xml version=\"1.0\" encoding=\"UTF-8\"?>","\n",
+				"<SSLConfigsExport>","\n",
+	  			"<SSLConfigs>","\n",
+    			"<CAFile>",
+				{ "Ref" : "ZenCloudMessagingDemoAppleCAFile" },
+				"</CAFile>","\n",
+    			"<CertificateFile>",
+				{ "Ref" : "ZenCloudMessagingDemoAppleCertificateFile" },
+				"</CertificateFile>","\n",
+			    "<CipherList>TLSv1:SSLv3:!ADH:!LOW:!EXP:@STRENGTH</CipherList>","\n",
+	    		"<Enabled>true</Enabled>","\n",
+    			"<Name>APNS</Name>","\n",
+				"<PrivateKeyFile>",
+				{ "Ref" : "ZenCloudMessagingDemoApplePrivateKeyFile" },
+				"</PrivateKeyFile>","\n",
+    			"<PrivateKeyType>2</PrivateKeyType>","\n",
+			    "<Protocols>6</Protocols>","\n",
+			    "<Type>false</Type>","\n",
+		    	"<VerifyDepth>9</VerifyDepth>","\n",
+			    "<VerifyPeer>1</VerifyPeer>","\n",
+			  	"</SSLConfigs>","\n",
+				"</SSLConfigsExport>","\n"
+
+				]]},
+				"mode" : "000500",
+				"owner" : "root",
+				"group" : "root"
+			 }
+			}
           }
 		}
       },
@@ -122,7 +216,7 @@
           "mkdir -p /home/admin/aws-cfn-bootstrap-latest","\n",
           "tar xvfz /home/admin/aws-cfn-bootstrap-latest.tar.gz --strip-components=1 -C /home/admin/aws-cfn-bootstrap-latest","\n",
           "sudo easy_install /home/admin/aws-cfn-bootstrap-latest/","\n",
-		  "echo 'Installed aws-cfn-bootstrap' > /home/admin/cloudformation.log","\n",
+		  "echo 'Installed aws-cfn-bootstrap' >> /home/admin/cloudformation.log","\n",
           "# Helper function\n",
           "function error_exit\n",
           "{\n",
@@ -131,43 +225,41 @@
           "}\n",
 
           "# Install packages\n",
-          "sudo cfn-init -s ", { "Ref" : "AWS::StackId" }, " -r IscServer ",
+          "sudo cfn-init -v -s ", { "Ref" : "AWS::StackId" }, " -r IscServer ",
           "    --region ", { "Ref" : "AWS::Region" }, " || error_exit 'Failed to run cfn-init'\n",
 
-		  "echo 'Ran cfn-init' > /home/admin/cloudformation.log","\n",
+		  "echo 'Ran cfn-init' >> /home/admin/cloudformation.log","\n",
 		  "# Increase shared memory\n",
 		  "echo 'kernel.shmmax=134217728' | sudo tee  -a /etc/sysctl.conf","\n",
 		  "sudo sysctl -p\n",
 
-		  "echo 'Updated system shared memory' > /home/admin/cloudformation.log","\n",
+		  "echo 'Updated system shared memory' >> /home/admin/cloudformation.log","\n",
 		  "# Create Isc users/groups\n",
+		  "sudo addgroup cacheusr","\n",
 		  "sudo adduser --system --disabled-password --disabled-login cacheusr","\n",
-		  "echo 'Created cacheusr' > /home/admin/cloudformation.log","\n",
+		  "sudo adduser cacheusr cacheusr","\n",
+		  "echo 'Created cacheusr user and group' >> /home/admin/cloudformation.log","\n",
  
-		  "sudo cp /home/admin/package.install.fix/package/install /home/admin/isc_install/package/install","\n",
+		  "# Install package/install patch\n",
+		  "sudo cp /home/admin/ens-ec2-cloud/package/install /home/admin/isc_install/package/install","\n",
+		  "echo 'Installed package/install patch' >> /home/admin/cloudformation.log","\n",
 
 		  "# Install Cache\n",
-		  "xx_current_dir=$(pwd)\n",
-		  "cd /home/admin/isc_install\n",
 		  "sudo ISC_PACKAGE_INSTANCENAME='", { "Ref" : "IscInstanceName" },"' ",
 			"ISC_PACKAGE_PLATFORM='lnxsusex64' ",
 			"ISC_PACKAGE_INSTALLDIR='", { "Ref": "IscInstallDir" },"' ",
  			"ISC_PACKAGE_INITIAL_SECURITY='", { "Ref":"IscInitialSecurity" },"' ",
  			"ISC_PACKAGE_MGRUSER='", { "Ref": "IscMgrUser" },"' ",
 		    "ISC_PACKAGE_MGRGROUP='", { "Ref" : "IscMgrGroup" },"' ",
- 			"ISC_PACKAGE_USER_PASSWORD='", { "Ref" : "IscUserPassword" },"' ./cinstall_silent ",
+ 			"ISC_PACKAGE_USER_PASSWORD='", { "Ref" : "IscUserPassword" },"' ",
+			"/home/admin/isc_install/cinstall_silent database_server ensemble_databases ",
 			" || error_exit 'Failed to install Cache'\n",
 
-		  "echo 'Installed Cache' > /home/admin/cloudformation.log","\n",
+		  "echo 'Installed Cache' >> /home/admin/cloudformation.log","\n",
 		  "# Start Cache\n",
-		  "cd ",{ "Ref" : "IscInstallDir" },"\n",
-		  "bin/ccontrol start ",{"Ref":"IscInstanceName"},
-		  " || error_exit 'Failed to start ",{"Ref":"IscInstanceName"},"'\n",
-		  "echo 'Started Cache' > /home/admin/cloudformation.log","\n",
-		  "# Install software into Cache\n",
-
           "# All is well so signal success\n",
-          "/opt/aws/bin/cfn-signal -e 0 -r \"IscServer setup complete\" '", { "Ref" : "WaitHandle" }, "'\n"
+          "sudo cfn-signal -e 0 -r \"IscServer setup complete\" '", { "Ref" : "WaitHandle" }, "'\n",
+          "sudo cfn-signal -e 0 -r \"IscServer setup complete\" '", { "Ref" : "WaitHandle" }, "'\n"
         ]]}}        
       }
     },
@@ -181,7 +273,7 @@
       "DependsOn" : "IscServer",
       "Properties" : {
         "Handle" : {"Ref" : "WaitHandle"},
-        "Timeout" : "9000"
+        "Timeout" : "43200"
       }
     },
     
@@ -201,7 +293,8 @@
   
   "Outputs" : {
     "WebsiteURL" : {
-      "Value" : { "Fn::Join" : ["", ["http://", { "Fn::GetAtt" : [ "IscServer", "PublicDnsName" ]}, ":57772" ]] },
+      "Value" : { "Fn::Join" : ["", ["http://", { "Fn::GetAtt" : [ "IscServer", "PublicDnsName" ]}, ":57772",
+					"/csp/sys/UtilHome.csp" ]] },
       "Description" : "URL for Ensemble"
     }
   }
