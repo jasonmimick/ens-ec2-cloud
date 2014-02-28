@@ -1,0 +1,208 @@
+{
+  "AWSTemplateFormatVersion" : "2010-09-09",
+  
+  "Description" : "This is a sample EC2 template to automate the deployment of an InterSystems server. This example will load and configure an Ensemble server. The configuration contains pulling code from github to load a ZenCloudMessaging node. The image is debian based and when loaded kernel memory settings are configured running Cache. The Ensemble instance will run it's internal web-server over the standard port 5772 and install to the default location /var/isc/ensemble.",
+  "Parameters" : {
+      
+    "KeyName": {
+      "Description" : "Name of an existing EC2 KeyPair to enable SSH access to the instances",
+      "Type": "String",
+      "MinLength": "1",
+      "MaxLength": "255",
+      "AllowedPattern" : "[\\x20-\\x7E]*",
+      "ConstraintDescription" : "can contain only ASCII characters."
+    },    
+
+    "IscInstanceName": {
+      "Default": "ENSEMBLE",
+      "Description" : "The name of the Ensemble Instance",
+      "Type": "String",
+      "MinLength": "1",
+      "MaxLength": "64",
+      "AllowedPattern" : "[a-zA-Z][a-zA-Z0-9]*",
+      "ConstraintDescription" : "must begin with a letter and contain only alphanumeric characters."
+    },
+
+    "IscInstallDir": {
+      "NoEcho": "false",
+	  "Default" : "/var/isc/ensemble",
+      "Description" : "Path to where instance will be installed",
+      "Type": "String",
+      "MinLength": "1",
+      "MaxLength": "100",
+      "ConstraintDescription" : "Should be some valid path on the system."
+    },
+	
+	"IscInitialSecurity": {
+	  "Default": "Normal",
+	  "Description" : "Initial security setting for Cache instance",
+      "Type" : "String",
+	  "AllowedValues" : [ "Minimal", "Normal", "Locked Down" ] 
+	},
+
+	"IscMgrUser" : {
+	  "Default" : "cacheusr",
+	  "Type" : "String",
+	  "Description" : "Login name of the owner of the installation"
+	},
+
+	"IscMgrGroup" : {
+	  "Default" : "cacheusr",
+	  "Type" : "String",
+	  "Description" : "Login name of the owner of the installation"
+	},
+
+    "IscUserPassword": {
+      "NoEcho": "true",
+      "Description" : "Password for Cache instance",
+      "Type": "String",
+      "MinLength": "1",
+      "MaxLength": "41"
+    },
+
+    "InstanceType" : {
+      "Description" : "EC2 instance type",
+      "Type" : "String",
+      "Default" : "t1.micro",
+      "AllowedValues" : [ "t1.micro" ],
+      "ConstraintDescription" : "must be a valid EC2 instance type."
+    },
+    "SSHLocation" : {
+      "Description" : " The IP address range that can be used to SSH to the EC2 instances",
+      "Type": "String",
+      "MinLength": "9",
+      "MaxLength": "18",
+      "Default": "0.0.0.0/0",
+      "AllowedPattern": "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})",
+      "ConstraintDescription": "must be a valid IP CIDR range of the form x.x.x.x/x."
+    }  
+  },
+  
+  "Mappings" : {
+    "AWSInstanceType2Arch" : {
+      "t1.micro"    : { "Arch" : "64" }
+   	},
+
+    "AWSRegionArch2AMI" : {
+      "us-east-1"      : { "64" : "ami-d3675dba" }
+    }
+  },
+    
+  "Resources" : {     
+      
+    "IscServer": {  
+      "Type": "AWS::EC2::Instance",
+      "Metadata" : {
+        "AWS::CloudFormation::Init" : {
+          "config" : {
+            "packages" : {
+              "apt" : {
+				"vim"		   : [],
+				"curl"		   : []
+              }
+            },
+            "sources" : {
+              "/home/admin/isc_install" : "http://healthshare.us/open_downloads/open/ensemble-2014.1.0.600.0-lnxsusex64.tar.gz",
+			 "/home/admin/package.install.fix" : "http://healthshare.us/open_downloads/open/install.zip"
+            }
+          }
+		}
+      },
+      "Properties": {
+        "ImageId" : { "Fn::FindInMap" : [ "AWSRegionArch2AMI", { "Ref" : "AWS::Region" },
+                          { "Fn::FindInMap" : [ "AWSInstanceType2Arch", { "Ref" : "InstanceType" }, "Arch" ] } ] },
+        "InstanceType"   : { "Ref" : "InstanceType" },
+        "SecurityGroups" : [ {"Ref" : "IscSecurityGroup"} ],
+        "KeyName"        : { "Ref" : "KeyName" },
+        "UserData"       : { "Fn::Base64" : { "Fn::Join" : ["", [
+          "#!/bin/bash -v\n",
+		  "sudo apt-get update\n",
+          "apt-get -y install python-setuptools\n",
+          "wget -P /home/admin https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-latest.tar.gz","\n",
+          "mkdir -p /home/admin/aws-cfn-bootstrap-latest","\n",
+          "tar xvfz /home/admin/aws-cfn-bootstrap-latest.tar.gz --strip-components=1 -C /home/admin/aws-cfn-bootstrap-latest","\n",
+          "sudo easy_install /home/admin/aws-cfn-bootstrap-latest/","\n",
+		  "echo 'Installed aws-cfn-bootstrap' > /home/admin/cloudformation.log","\n",
+          "# Helper function\n",
+          "function error_exit\n",
+          "{\n",
+          "  sudo cfn-signal -e 1 -r \"$1\" '", { "Ref" : "WaitHandle" }, "'\n",
+          "  exit 1\n",
+          "}\n",
+
+          "# Install packages\n",
+          "sudo cfn-init -s ", { "Ref" : "AWS::StackId" }, " -r IscServer ",
+          "    --region ", { "Ref" : "AWS::Region" }, " || error_exit 'Failed to run cfn-init'\n",
+
+		  "echo 'Ran cfn-init' > /home/admin/cloudformation.log","\n",
+		  "# Increase shared memory\n",
+		  "echo 'kernel.shmmax=134217728' | sudo tee  -a /etc/sysctl.conf","\n",
+		  "sudo sysctl -p\n",
+
+		  "echo 'Updated system shared memory' > /home/admin/cloudformation.log","\n",
+		  "# Create Isc users/groups\n",
+		  "sudo adduser --system --disabled-password --disabled-login cacheusr","\n",
+		  "echo 'Created cacheusr' > /home/admin/cloudformation.log","\n",
+ 
+		  "sudo cp /home/admin/package.install.fix/package/install /home/admin/isc_install/package/install","\n",
+
+		  "# Install Cache\n",
+		  "xx_current_dir=$(pwd)\n",
+		  "cd /home/admin/isc_install\n",
+		  "sudo ISC_PACKAGE_INSTANCENAME='", { "Ref" : "IscInstanceName" },"' ",
+			"ISC_PACKAGE_PLATFORM='lnxsusex64' ",
+			"ISC_PACKAGE_INSTALLDIR='", { "Ref": "IscInstallDir" },"' ",
+ 			"ISC_PACKAGE_INITIAL_SECURITY='", { "Ref":"IscInitialSecurity" },"' ",
+ 			"ISC_PACKAGE_MGRUSER='", { "Ref": "IscMgrUser" },"' ",
+		    "ISC_PACKAGE_MGRGROUP='", { "Ref" : "IscMgrGroup" },"' ",
+ 			"ISC_PACKAGE_USER_PASSWORD='", { "Ref" : "IscUserPassword" },"' ./cinstall_silent ",
+			" || error_exit 'Failed to install Cache'\n",
+
+		  "echo 'Installed Cache' > /home/admin/cloudformation.log","\n",
+		  "# Start Cache\n",
+		  "cd ",{ "Ref" : "IscInstallDir" },"\n",
+		  "bin/ccontrol start ",{"Ref":"IscInstanceName"},
+		  " || error_exit 'Failed to start ",{"Ref":"IscInstanceName"},"'\n",
+		  "echo 'Started Cache' > /home/admin/cloudformation.log","\n",
+		  "# Install software into Cache\n",
+
+          "# All is well so signal success\n",
+          "/opt/aws/bin/cfn-signal -e 0 -r \"IscServer setup complete\" '", { "Ref" : "WaitHandle" }, "'\n"
+        ]]}}        
+      }
+    },
+
+    "WaitHandle" : {
+      "Type" : "AWS::CloudFormation::WaitConditionHandle"
+    },
+
+    "WaitCondition" : {
+      "Type" : "AWS::CloudFormation::WaitCondition",
+      "DependsOn" : "IscServer",
+      "Properties" : {
+        "Handle" : {"Ref" : "WaitHandle"},
+        "Timeout" : "9000"
+      }
+    },
+    
+    "IscSecurityGroup" : {
+      "Type" : "AWS::EC2::SecurityGroup",
+      "Properties" : {
+        "GroupDescription" : "Enable default InterSystems ports and ssh",
+        "SecurityGroupIngress" : [
+          {"IpProtocol" : "tcp", "FromPort" : "1972", "ToPort" : "1972", "CidrIp" : "0.0.0.0/0"},
+          {"IpProtocol" : "tcp", "FromPort" : "57772", "ToPort" : "57772", "CidrIp" : "0.0.0.0/0"},
+          {"IpProtocol" : "tcp", "FromPort" : "9980", "ToPort" : "9999", "CidrIp" : "0.0.0.0/0"},
+          {"IpProtocol" : "tcp", "FromPort" : "22", "ToPort" : "22", "CidrIp" : { "Ref" : "SSHLocation"}}
+        ]
+      }      
+    }
+  },
+  
+  "Outputs" : {
+    "WebsiteURL" : {
+      "Value" : { "Fn::Join" : ["", ["http://", { "Fn::GetAtt" : [ "IscServer", "PublicDnsName" ]}, ":57772" ]] },
+      "Description" : "URL for Ensemble"
+    }
+  }
+}

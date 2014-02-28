@@ -1,0 +1,95 @@
+#!/bin/sh
+
+scriptDir=`dirname "$0"`
+cd "$scriptDir"
+absScriptDir=`pwd`
+
+umask 022
+
+#Sets up the path to package tools
+#argument 1 is package files location, i.e. /package
+EstablishToolsPath() {
+    PATH=$1/../tools:$PATH
+    export PATH
+    platform=
+	if [ -z "$ISC_PACKAGE_PLATFORM" ]; then
+    	platforms=`cplatname identify`
+	else
+		platforms=$ISC_PACKAGE_PLATFORM
+	fi
+    if [ -z "$platforms" ] ; then
+		#no supported platforms detected, query the user
+		#after an appropriate warning
+        echo
+		echo "Warning: The installer can't find a platform in this distribution"
+		echo "supported by your system."
+		echo
+		echo "Searching for platforms that might install in unsupported mode..."
+		echo 
+		GetPlatform "$1/.."
+		#save these so we don't ask again
+		ISC_PACKAGE_PLATFORM="$platform"
+		export ISC_PACKAGE_PLATFORM
+    else
+		for potential_platform in $platforms ; do
+	    	if [ -x "$1/../tools/$potential_platform/jam" ] ; then
+			platform=$potential_platform
+	    	fi
+		done
+		if [ -z "$platform" ] ; then
+            echo "The installer can't find a platform in this distribution supported by your system."
+            echo "Contact InterSystems support."
+            exit 9
+		fi
+    fi
+    PATH=$1/../tools/$platform:$PATH
+    export PATH
+}
+
+#always use our local scripts not in /tools
+PATH=$absScriptDir:$absScriptDir/..:$PATH
+. platform.include
+
+#we allow an explicit package directory, which we'll use for /tools
+#note that this means there should not be a source /tools directory:
+#it should always be created by the build
+if [ -n "$ISC_PACKAGE_DIST_SRC" ] ; then
+    EstablishToolsPath "$ISC_PACKAGE_DIST_SRC/package"
+else
+    EstablishToolsPath "$absScriptDir"
+fi
+
+tempDir=`getTempDir`
+
+if [ -z "$ISC_PACKAGE_PARAMETERS_FILE" ] ; then
+    parametersFile="$tempDir/parameters.isc"
+    rm -f "$parametersFile" || (echo "Can't clear old parameters file: $parametersFile" && exit 1)
+    echo > "$parametersFile" || (echo "Can't create parameters file: $parametersFile" && exit 1)
+    chmod 600 "$parametersFile" 
+else
+    parametersFile="$ISC_PACKAGE_PARAMETERS_FILE"
+fi
+
+installLogFile="$tempDir/install.log"
+echo > "$installLogFile" || (echo "Can't create install log: $installLogFile" && exit 1)
+
+chmod 600 "$installLogFile"
+
+#Initial default behavior is to find all packages for install,
+#unless a package list is specified, in which case we build that
+packages=$*
+if [ -z "$packages" ] ; then
+    packages=`listPackages $absScriptDir | sort | xargs echo`
+fi
+
+#Store our starting STDIN in file descriptor 8 for access inside
+#Jam projects
+packageInstall "$packages" "$parametersFile" "$installLogFile" 8>&0
+if [ "$?" = "0" ] ; then 
+    echo "Installation completed successfully"
+fi
+
+#Clean up
+clearTempDir "$tempDir"
+if [ "$?" != "0" ] ; then echo "Couldn't clean up temporary directory '$tempDir'." ; exit 1 ; fi
+
