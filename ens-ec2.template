@@ -13,6 +13,11 @@
       "ConstraintDescription" : "can contain only ASCII characters."
     },    
 
+ 	"BucketName" : {
+      "Description" : "Name of bucket containing license key and secret stuff",
+      "Type" : "String",
+	  "Default" : "ens-ec2-cloud"
+    },
     "IscInstanceName": {
       "Default": "ENSEMBLE",
       "Description" : "The name of the Ensemble Instance",
@@ -63,17 +68,17 @@
 	"ZenCloudMessagingDemoAppleCAFile" : {
 	  "Description" : "Certificate Authority file (.cer) to use in APNS SSL Configuration",
 	  "Type" : "String",
-	  "Default" : "https://ens-ec2-cloud.s3.amazonaws.com/apns/apple.ca.cer"
+	  "Default" : "/var/isc/secrets/apple.ca.cer"
 	},
 	"ZenCloudMessagingDemoAppleCertificateFile" : {
 	  "Description" : "Public certificate file (.pem) to use in APNS SSL Configuration",
 	  "Type" : "String",
-	  "Default" : "https://ens-ec2-cloud.s3.amazonaws.com/apns/apns.cert.pem"
+	  "Default" : "/var/isc/secrets/apns.cert.pem"
 	},
 	"ZenCloudMessagingDemoApplePrivateKeyFile" : {
 	  "Description" : "Private key file (.pem) to use in APNS SSL Configuration",
 	  "Type" : "String",
-	  "Default" : "https://ens-ec2-cloud.s3.amazonaws.com/apns/apns.privatekey.pem"
+	  "Default" : "/var/isc/secrets/apns.privatekey.pem"
 	},
 	
     "InstanceType" : {
@@ -105,26 +110,114 @@
   },
     
   "Resources" : {     
-      
+
+    "CfnUser" : {
+      "Type" : "AWS::IAM::User",
+      "Properties" : {
+        "Path": "/",
+        "Policies": [{
+          "PolicyName": "root",
+          "PolicyDocument": { "Statement":[{
+            "Effect"   : "Allow",
+            "Action"   : [
+              "cloudformation:DescribeStackResource",
+              "s3:GetObject"
+            ],
+            "Resource" :"*"
+          }]}
+        }]
+      }
+    },
+
+    "CfnKeys" : {
+      "Type" : "AWS::IAM::AccessKey",
+      "Properties" : {
+        "UserName" : {"Ref": "CfnUser"}
+      }
+    },
+
+    "PrivateBucketPolicy" : {
+      "Type" : "AWS::S3::BucketPolicy",
+      "Properties" : {
+        "PolicyDocument": {
+          "Version"      : "2008-10-17",
+          "Id"           : "PrivateBucketPolicy",
+          "Statement"    : [{
+            "Sid"        : "ReadAccess",
+            "Action"     : ["s3:GetObject"],
+            "Effect"     : "Allow",
+            "Resource"   : { "Fn::Join" : ["", ["arn:aws:s3:::", { "Ref" : "BucketName" }, "/*"]]},
+            "Principal"  : { "AWS": {"Fn::GetAtt" : ["CfnUser", "Arn"]} }
+          }]
+        },
+        "Bucket" : { "Ref" : "BucketName" }
+      }
+    },
+
+	"HostKeys" : {
+  		"Type" : "AWS::IAM::AccessKey",
+  		"Properties" : {
+    		"UserName" : {"Ref": "CfnUser"}
+  	}
+	},
+
     "IscServer": {  
       "Type": "AWS::EC2::Instance",
+	  "DependsOn" : "PrivateBucketPolicy",
       "Metadata" : {
+		"AWS::CloudFormation::Authentication" : {
+          "S3AccessCreds" : {
+            "type" : "S3",
+            "accessKeyId" : { "Ref" : "CfnKeys" },
+            "secretKey" : {"Fn::GetAtt": ["CfnKeys", "SecretAccessKey"]},
+            "buckets" : [ { "Ref" : "BucketName" } ]
+          }
+        },
         "AWS::CloudFormation::Init" : {
           "config" : {
             "packages" : {
               "apt" : {
 				"vim"		   : [],
 				"expect"	   : [],
-				"curl"		   : []
+				"curl"		   : [],
+				"python-pip"   : []
               }
             },
             "sources" : {
-              "/home/admin/isc_install" : "https://ens-ec2-cloud.s3.amazonaws.com/ensemble-2014.1.0.600.0-lnxsusex64.tar.gz",
-			 "/home/admin/ens-ec2-cloud" : "https://github.com/jasonmimick/ens-ec2-cloud/tarball/master",
-			 "/home/admin/gs2014"	: "https://github.com/jasonmimick/gs2014/tarball/master"
+			 "/home/admin/ens-ec2-cloud" : "https://github.com/jasonmimick/ens-ec2-cloud/tarball/master"
+			 ,"/home/admin/gs2014"	: "https://github.com/jasonmimick/gs2014/tarball/master"
+             ,"/home/admin/isc_install" : "https://ens-ec2-cloud.s3.amazonaws.com/ensemble-2014.1.0.600.0-lnxsusex64.tar.gz"
             },
 			"files" : {
-			 "/tmp/setup.zencloudmessaging" : {
+     		 "/var/isc/ensemble/mgr/cache.key" : {
+  				"source" : { "Fn::Join" : ["", ["http://s3.amazonaws.com/" , { "Ref" : "BucketName" }, "/007/cache.key"]]},
+                "mode"   : "000400",
+                "owner"  : "root",
+                "group"  : "root",
+				"authentication" : "S3AccessCreds"
+			 },     		 
+     		 "/var/isc/secrets/apns.cert.pem" : {
+  				"source" : { "Fn::Join" : ["", ["http://s3.amazonaws.com/" , { "Ref" : "BucketName" }, "/007/apns.cert.pem"]]},
+                "mode"   : "000400",
+                "owner"  : "root",
+                "group"  : "root",
+				"authentication" : "S3AccessCreds"
+			 },     		 
+     		 "/var/isc/secrets/apns.privatekey.pem" : {
+  				"source" : { "Fn::Join" : ["", ["http://s3.amazonaws.com/" , { "Ref" : "BucketName" }, "/007/apns.privatekey.pem"]]},
+                "mode"   : "000400",
+                "owner"  : "root",
+                "group"  : "root",
+				"authentication" : "S3AccessCreds"
+			 },     		 
+			 "/var/isc/secrets/apple.ca.cer" : {
+				"source" : { "Fn::Join" : ["", ["http://s3.amazonaws.com/" , { "Ref" : "BucketName" }, "/007/apple.ca.cer"]]},
+                "mode"   : "000400",
+                "owner"  : "root",
+                "group"  : "root",
+				"authentication" : "S3AccessCreds"
+			 },			 
+			"/tmp/setup.zencloudmessaging" : {
 				 "content" : { "Fn::Join" : ["", [
 					"#!/bin/bash -f","\n",
 					"# script to setup zencloudmessaing from github","\n",
@@ -141,22 +234,29 @@
 					"   send \"",{"Ref":"IscUserPassword"},"\\r\"","\n",
 					"}","\n",
 					"expect \"$NAMESPACE>\" {","\n",
-					"   send \"do ##class(%SYSTEM.OBJ).Load(\"/home/admin/gs2014/MyZenCloudMessaging.prj.xml\",\"ck\") ","\\r\"","\n",
+					"   send \"do ##class(%SYSTEM.OBJ).Load(\\\"/home/admin/gs2014/MyZenCloudMessaging.prj.xml\\\",\\\"ck\\\") ","\\r\"","\n",
 					"}","\n",
 					"expect \"$NAMESPACE>\" {","\n",
-					"   send \"do Setup^LoadZENCloudMessaging ","\\r\"","\n",
+					"   send \"w 1 // do Setup^LoadZENCloudMessaging ","\\r\"","\n",
 					"}","\n",
 					"expect \"$NAMESPACE>\" {","\n",
-					"   send \"zn \"%SYS\"","\\r\"","\n",
+					"   send \"zn \\\"%SYS\\\"","\\r\"","\n",
 					"}","\n",
 					"expect \"%SYS>\" {","\n",
-					"   send \"do ##class(Security.SSLConfigs.Import(\"/tmp/apple.ssl.xml\")","\\r\"","\n",
+					"   send \"do ##class(Security.SSLConfigs).Import(\\\"/tmp/apns.ssl.xml\\\")","\\r\"","\n",
+					"expect \"%SYS>\" {","\n",
+					"   send \"do ##class(Security.SSLConfigs).Create(\\\"GCMCHROME\\\")","\\r\"","\n",
 					"}","\n",
 					"expect \"%SYS>\" {","\n",
-					"   send \"zn \"$NAMESPACE\"","\\r\"","\n",
+					"   send \"zn \\\"$NAMESPACE\\\"","\\r\"","\n",
 					"}","\n",
 					"expect \"$NAMESPACE>\" {","\n",
-					"   send \"do ##class(Ens.Director).StartProduction(\"Test.ZenCloudMessaging.DevProduction\")","\\r\"","\n",
+					"   send \"do ##class(Ens.Director).StartProduction(\\\"Test.ZenCloudMessaging.DevProduction\\\")","\\r\"","\n",
+					"}","\n",
+					"expect \"$NAMESPACE>\" {","\n",
+					"   send \"do SystemReady^ZenCloudMessageDemo(\\\"",
+					"amazon.wow.works.really",
+					"\\\")","\\r\"","\n",
 					"}","\n",
 					"expect \"$NAMESPACE>\" {","\n",
 					"   send \"halt","\\r\"","\n",
@@ -168,7 +268,7 @@
 				"owner" : "root",
 				"group" : "root"
 			 },
-			 "/tmp/apple.ssl.xml" : {
+			 "/tmp/apns.ssl.xml" : {
 				"content" : { "Fn::Join" : ["", [
 				"<?xml version=\"1.0\" encoding=\"UTF-8\"?>","\n",
 				"<SSLConfigsExport>","\n",
@@ -189,22 +289,48 @@
 			    "<Protocols>6</Protocols>","\n",
 			    "<Type>false</Type>","\n",
 		    	"<VerifyDepth>9</VerifyDepth>","\n",
+			    "<VerifyPeer>0</VerifyPeer>","\n",
+			  	"</SSLConfigs>","\n",
+				"</SSLConfigsExport>","\n"
+				]]},
+				"mode" : "000544",
+				"owner" : "root",
+				"group" : "root"
+			 },	
+			 "/tmp/gcmchrome.ssl.xml" : {
+				"content" : { "Fn::Join" : ["", [
+				"<?xml version=\"1.0\" encoding=\"UTF-8\"?>","\n",
+				"<SSLConfigsExport>","\n",
+	  			"<SSLConfigs>","\n",
+    			"<CAFile>",
+				"</CAFile>","\n",
+    			"<CertificateFile>",
+				"</CertificateFile>","\n",
+			    "<CipherList>TLSv1:SSLv3:!ADH:!LOW:!EXP:@STRENGTH</CipherList>","\n",
+	    		"<Enabled>true</Enabled>","\n",
+    			"<Name>APNS</Name>","\n",
+				"<PrivateKeyFile>",
+				"</PrivateKeyFile>","\n",
+    			"<PrivateKeyType>2</PrivateKeyType>","\n",
+			    "<Protocols>6</Protocols>","\n",
+			    "<Type>false</Type>","\n",
+		    	"<VerifyDepth>9</VerifyDepth>","\n",
 			    "<VerifyPeer>1</VerifyPeer>","\n",
 			  	"</SSLConfigs>","\n",
 				"</SSLConfigsExport>","\n"
-
 				]]},
-				"mode" : "000500",
+				"mode" : "000544",
 				"owner" : "root",
 				"group" : "root"
 			 }
+
 			}
           }
 		}
       },
       "Properties": {
         "ImageId" : { "Fn::FindInMap" : [ "AWSRegionArch2AMI", { "Ref" : "AWS::Region" },
-                          { "Fn::FindInMap" : [ "AWSInstanceType2Arch", { "Ref" : "InstanceType" }, "Arch" ] } ] },
+                    { "Fn::FindInMap" : [ "AWSInstanceType2Arch", { "Ref" : "InstanceType" }, "Arch" ] } ] },
         "InstanceType"   : { "Ref" : "InstanceType" },
         "SecurityGroups" : [ {"Ref" : "IscSecurityGroup"} ],
         "KeyName"        : { "Ref" : "KeyName" },
@@ -226,9 +352,15 @@
 
           "# Install packages\n",
           "sudo cfn-init -v -s ", { "Ref" : "AWS::StackId" }, " -r IscServer ",
-          "    --region ", { "Ref" : "AWS::Region" }, " || error_exit 'Failed to run cfn-init'\n",
+          " --access-key ", { "Ref" : "CfnKeys" },
+          " --secret-key ", {"Fn::GetAtt": ["CfnKeys", "SecretAccessKey"]},
+          " --region ", { "Ref" : "AWS::Region" }, " || error_exit 'Failed to run cfn-init'\n",
 
 		  "echo 'Ran cfn-init' >> /home/admin/cloudformation.log","\n",
+		
+		  "sudo pip install awscli","\n",
+		  "echo 'Installed awscli' >> /home/admin/cloudformation.log","\n",
+
 		  "# Increase shared memory\n",
 		  "echo 'kernel.shmmax=134217728' | sudo tee  -a /etc/sysctl.conf","\n",
 		  "sudo sysctl -p\n",
@@ -239,7 +371,13 @@
 		  "sudo adduser --system --disabled-password --disabled-login cacheusr","\n",
 		  "sudo adduser cacheusr cacheusr","\n",
 		  "echo 'Created cacheusr user and group' >> /home/admin/cloudformation.log","\n",
- 
+
+		  "# Make cacheusr owner of secrets, so Cache can read the SSL stuff","\n", 
+		  "sudo chown cacheusr:cacheusr /var/isc/secrets/*.*","\n",
+		  "sudo chown cacheusr:cacheusr /tmp/apns.ssl.xml","\n",
+		  "sudo chown cacheusr:cacheusr /tmp/gcmchrome.ssl.xml","\n",
+		  "sudo chmod +r /var/isc/secrets/*.*","\n",
+
 		  "# Install package/install patch\n",
 		  "sudo cp /home/admin/ens-ec2-cloud/package/install /home/admin/isc_install/package/install","\n",
 		  "echo 'Installed package/install patch' >> /home/admin/cloudformation.log","\n",
@@ -256,7 +394,10 @@
 			" || error_exit 'Failed to install Cache'\n",
 
 		  "echo 'Installed Cache' >> /home/admin/cloudformation.log","\n",
-		  "# Start Cache\n",
+		  "# Start Cache - not needed since install should start it\n",
+		
+		  "# Run setup script for demo","\n",
+		  "sudo /tmp/setup.zencloudmessaging | sudo tee  -a /home/admin/cloudformation.log"
           "# All is well so signal success\n",
           "sudo cfn-signal -e 0 -r \"IscServer setup complete\" '", { "Ref" : "WaitHandle" }, "'\n",
           "sudo cfn-signal -e 0 -r \"IscServer setup complete\" '", { "Ref" : "WaitHandle" }, "'\n"

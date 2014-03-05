@@ -1,3 +1,4 @@
+             ///*,"/home/admin/isc_install" : "https://ens-ec2-cloud.s3.amazonaws.com/ensemble-2014.1.0.600.0-lnxsusex64.tar.gz"
 /*
           "sudo ",{ "Ref" : "IscInstallDir" },"/bin/ccontrol start ",{"Ref":"IscInstanceName"},
           " || error_exit 'Failed to start ",{"Ref":"IscInstanceName"},"'\n",
