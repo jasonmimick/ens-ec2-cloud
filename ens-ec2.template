@@ -255,7 +255,7 @@
 					"}","\n",
 					"expect \"$NAMESPACE>\" {","\n",
 					"   send \"do SystemReady^ZenCloudMessageDemo(\\\"",
-					"",
+					"Foo",
 					"\\\")","\\r\"","\n",
 					"}","\n",
 					"expect \"$NAMESPACE>\" {","\n",
