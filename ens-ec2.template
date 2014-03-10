@@ -255,7 +255,7 @@
 					"}","\n",
 					"expect \"$NAMESPACE>\" {","\n",
 					"   send \"do SystemReady^ZenCloudMessageDemo(\\\"",
-					"amazon.wow.works.really",
+					"",
 					"\\\")","\\r\"","\n",
 					"}","\n",
 					"expect \"$NAMESPACE>\" {","\n",
@@ -397,7 +397,8 @@
 		  "# Start Cache - not needed since install should start it\n",
 		
 		  "# Run setup script for demo","\n",
-		  "sudo /tmp/setup.zencloudmessaging | sudo tee  -a /home/admin/cloudformation.log"
+		  "sudo /tmp/setup.zencloudmessaging | sudo tee  -a /home/admin/cloudformation.log","\n",
+
           "# All is well so signal success\n",
           "sudo cfn-signal -e 0 -r \"IscServer setup complete\" '", { "Ref" : "WaitHandle" }, "'\n",
           "sudo cfn-signal -e 0 -r \"IscServer setup complete\" '", { "Ref" : "WaitHandle" }, "'\n"
